@@ -45,7 +45,13 @@ class Program
         }
         catch (Exception ex)
         {
-            Console.WriteLine("Ошибка при подключении: " + ex.Message);
+            Console.WriteLine("Произошла ошибка при работе с базой данных: " + ex.Message);
+
+            if (conn.State == System.Data.ConnectionState.Open)
+            {
+                conn.Close();
+                Console.WriteLine("Соединение с базой данных было закрыто из-за ошибки.");
+            }
         }
     }
     // Добавление сотрудника

@@ -4,9 +4,19 @@ using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
 using ConsoleTables;
 
+class Employee
+{
+    public int? Id { get; set; }
+    public string? FirstName { get; set; }
+    public string? LastName { get; set; }
+    public string? Email { get; set; }
+    public DateTime? DateOfBirth { get; set; }
+    public decimal? Salary { get; set; }
+}
 class Program
 {
     static SqlConnection conn = new SqlConnection(@"Server=(localdb)\MSSQLLocalDB;Database=EmployeeDB;Trusted_Connection=True;");
+    static readonly Regex EmailRegex = new Regex(@"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     static void Main()
     {
         try
@@ -57,20 +67,23 @@ class Program
     // Добавление сотрудника
     static void AddEmployee()
     {
-        string first = ReadString("Имя");
-        string last = ReadString("Фамилия");
-        string email = ReadEmail();
-        DateTime dob = ReadDate("Дата рождения (ДД-ММ-ГГГГ)");
-        decimal salary = ReadDecimal("Зарплата");
+        var emp = new Employee
+        {
+            FirstName = ReadString("Имя"),
+            LastName = ReadString("Фамилия"),
+            Email = ReadEmail(),
+            DateOfBirth = ReadDate("Дата рождения (ДД-ММ-ГГГГ)"),
+            Salary = ReadDecimal("Зарплата")
+        };
 
         string sql = "INSERT INTO Employees (FirstName, LastName, Email, DateOfBirth, Salary) VALUES (@f,@l,@e,@d,@s)";
         using (var cmd = new SqlCommand(sql, conn))
         {
-            cmd.Parameters.AddWithValue("@f", first);
-            cmd.Parameters.AddWithValue("@l", last);
-            cmd.Parameters.AddWithValue("@e", email);
-            cmd.Parameters.AddWithValue("@d", dob);
-            cmd.Parameters.AddWithValue("@s", salary);
+            cmd.Parameters.AddWithValue("@f", emp.FirstName);
+            cmd.Parameters.AddWithValue("@l", emp.LastName);
+            cmd.Parameters.AddWithValue("@e", emp.Email);
+            cmd.Parameters.AddWithValue("@d", emp.DateOfBirth);
+            cmd.Parameters.AddWithValue("@s", emp.Salary);
             SafeExecuteNonQuery(cmd, "Сотрудник добавлен.");
         }
     }
@@ -79,29 +92,24 @@ class Program
     {
         try
         {
-            string sql = "SELECT * FROM Employees";
-            using (var cmd = new SqlCommand(sql, conn))
+            using (var cmd = new SqlCommand("SELECT * FROM Employees", conn))
             using (var reader = cmd.ExecuteReader())
             {
                 var table = new ConsoleTable("ID", "Имя", "Фамилия", "Email", "ДатаРожд", "Зарплата");
-
                 while (reader.Read())
                 {
                     DateTime dob = Convert.ToDateTime(reader["DateOfBirth"]);
-                    string dobStr = dob.ToString("dd-MM-yyyy");
-
                     table.AddRow(
                         reader["EmployeeID"],
                         reader["FirstName"],
                         reader["LastName"],
                         reader["Email"],
-                        dobStr,
+                        dob.ToString("dd-MM-yyyy"),
                         reader["Salary"]
                     );
                 }
-
                 Console.WriteLine();
-                table.Write(Format.Alternative); // красивый стиль
+                table.Write(Format.Alternative);
                 Console.WriteLine();
             }
         }
@@ -111,79 +119,46 @@ class Program
         }
     }
     // Обновление сотрудника
-    // Обновление сотрудника
     static void UpdateEmployee()
     {
         int id = ReadInt("ID сотрудника");
-        using var check = new SqlCommand("SELECT COUNT(*) FROM Employees WHERE EmployeeID=@id", conn);
-        check.Parameters.AddWithValue("@id", id);
-        if ((int)check.ExecuteScalar() == 0)
+        var emp = new Employee { Id = id };
+
+        Console.WriteLine("Оставьте поле пустым, если не нужно обновлять.");
+        emp.FirstName = ReadString("Имя", true);
+        emp.LastName = ReadString("Фамилия", true);
+        emp.Email = ReadEmail(true);
+        emp.DateOfBirth = ReadDate("Дата рождения (ДД-ММ-ГГГГ)", true);
+        emp.Salary = ReadDecimal("Зарплата", true);
+
+        string sql = "UPDATE Employees SET ";
+        var updates = new System.Collections.Generic.List<string>();
+        using (var cmd = new SqlCommand())
         {
-            Console.WriteLine("Сотрудник с таким ID не найден.");
-            return;
-        }
+            cmd.Connection = conn;
+            if (!string.IsNullOrEmpty(emp.FirstName)) { updates.Add("FirstName=@f"); cmd.Parameters.AddWithValue("@f", emp.FirstName); }
+            if (!string.IsNullOrEmpty(emp.LastName)) { updates.Add("LastName=@l"); cmd.Parameters.AddWithValue("@l", emp.LastName); }
+            if (!string.IsNullOrEmpty(emp.Email)) { updates.Add("Email=@e"); cmd.Parameters.AddWithValue("@e", emp.Email); }
+            if (emp.DateOfBirth.HasValue) { updates.Add("DateOfBirth=@d"); cmd.Parameters.AddWithValue("@d", emp.DateOfBirth); }
+            if (emp.Salary.HasValue) { updates.Add("Salary=@s"); cmd.Parameters.AddWithValue("@s", emp.Salary); }
 
-        Console.WriteLine("Введите новые значения (Enter — оставить без изменений):");
-
-        string first = ReadString("Имя");
-        string last = ReadString("Фамилия");
-
-        Console.Write("Email: ");
-        string emailInput = Console.ReadLine();
-        string email = string.IsNullOrWhiteSpace(emailInput) ? null : ReadEmail(emailInput);
-
-        Console.Write("Дата рождения (ДД-ММ-ГГГГ): ");
-        string dobInput = Console.ReadLine();
-        DateTime? dob = null;
-        if (!string.IsNullOrWhiteSpace(dobInput))
-        {
-            while (!DateTime.TryParseExact(dobInput, "dd-MM-yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime temp))
+            if (updates.Count == 0)
             {
-                Console.Write("Неверный формат, повторите (ДД-ММ-ГГГГ): ");
-                dobInput = Console.ReadLine();
+                Console.WriteLine("Нет данных для обновления.");
+                return;
             }
-            dob = DateTime.ParseExact(dobInput, "dd-MM-yyyy", CultureInfo.InvariantCulture);
+
+            sql += string.Join(", ", updates) + " WHERE EmployeeID=@id";
+            cmd.CommandText = sql;
+            cmd.Parameters.AddWithValue("@id", emp.Id);
+            SafeExecuteNonQuery(cmd, "Сотрудник обновлён.");
         }
-
-        Console.Write("Зарплата: ");
-        string salaryInput = Console.ReadLine();
-        decimal? salary = null;
-        if (!string.IsNullOrWhiteSpace(salaryInput))
-        {
-            while (!decimal.TryParse(salaryInput, out decimal val))
-            {
-                Console.Write("Введите корректное число: ");
-                salaryInput = Console.ReadLine();
-            }
-            salary = decimal.Parse(salaryInput);
-        }
-
-        var updates = new List<string>();
-        var cmd = new SqlCommand();
-        cmd.Connection = conn;
-
-        if (!string.IsNullOrWhiteSpace(first)) { updates.Add("FirstName=@f"); cmd.Parameters.AddWithValue("@f", first); }
-        if (!string.IsNullOrWhiteSpace(last)) { updates.Add("LastName=@l"); cmd.Parameters.AddWithValue("@l", last); }
-        if (email != null) { updates.Add("Email=@e"); cmd.Parameters.AddWithValue("@e", email); }
-        if (dob.HasValue) { updates.Add("DateOfBirth=@d"); cmd.Parameters.AddWithValue("@d", dob.Value); }
-        if (salary.HasValue) { updates.Add("Salary=@s"); cmd.Parameters.AddWithValue("@s", salary.Value); }
-
-        if (updates.Count == 0)
-        {
-            Console.WriteLine("Нет изменений для обновления.");
-            return;
-        }
-
-        cmd.CommandText = $"UPDATE Employees SET {string.Join(", ", updates)} WHERE EmployeeID=@id";
-        cmd.Parameters.AddWithValue("@id", id);
-        SafeExecuteNonQuery(cmd, "Данные обновлены.");
     }
     // Удаление сотрудника
     static void DeleteEmployee()
     {
         int id = ReadInt("ID сотрудника для удаления");
-        string sql = "DELETE FROM Employees WHERE EmployeeID=@id";
-        using (var cmd = new SqlCommand(sql, conn))
+        using (var cmd = new SqlCommand("DELETE FROM Employees WHERE EmployeeID=@id", conn))
         {
             cmd.Parameters.AddWithValue("@id", id);
             SafeExecuteNonQuery(cmd, "Удалено.");
@@ -200,7 +175,7 @@ class Program
             {
                 cmd.Parameters.AddWithValue("@avg", avg);
                 int count = (int)cmd.ExecuteScalar();
-                Console.WriteLine($"Средняя зарплата: {avg}, сотрудников с выше средней: {count}");
+                Console.WriteLine($"Средняя зарплата: {avg}, сотрудников выше средней: {count}");
             }
         }
         catch (Exception ex)
@@ -209,44 +184,63 @@ class Program
         }
     }
     // Вспомогательные функции
-    static string ReadString(string label)
+    static string ReadString(string label, bool acceptNull = false)
     {
         Console.Write($"{label}: ");
-        return Console.ReadLine()?.Trim() ?? "";
-    }
-    static string ReadEmail(string? input = null)
-    {
-        string email = input ?? ReadString("Email");
-        Regex regex = new Regex(@"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", RegexOptions.IgnoreCase);
-        while (!regex.IsMatch(email))
+        string input = Console.ReadLine()?.Trim();
+        if (acceptNull && string.IsNullOrEmpty(input)) return null;
+        while (string.IsNullOrEmpty(input))
         {
-            Console.Write("Некорректный Email. Введите снова: ");
+            Console.Write($"{label} не может быть пустым. Повторите: ");
+            input = Console.ReadLine()?.Trim();
+        }
+        return input;
+    }
+
+    static string ReadEmail(bool acceptNull = false)
+    {
+        string email = ReadString("Email", acceptNull);
+        if (acceptNull && string.IsNullOrEmpty(email)) return null;
+
+        while (!EmailRegex.IsMatch(email))
+        {
+            Console.Write("Некорректный Email. Повторите: ");
             email = Console.ReadLine();
+            if (acceptNull && string.IsNullOrEmpty(email)) return null;
         }
         return email;
     }
-    static DateTime ReadDate(string label)
+
+    static DateTime? ReadDate(string label, bool acceptNull = false)
     {
         Console.Write($"{label}: ");
         string input = Console.ReadLine();
+        if (acceptNull && string.IsNullOrEmpty(input)) return null;
+
         while (!DateTime.TryParseExact(input, "dd-MM-yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date))
         {
-            Console.Write("Неверный формат даты. Повторите (ДД-ММ-ГГГГ): ");
+            Console.Write("Неверный формат. Повторите (ДД-ММ-ГГГГ): ");
             input = Console.ReadLine();
+            if (acceptNull && string.IsNullOrEmpty(input)) return null;
         }
         return DateTime.ParseExact(input, "dd-MM-yyyy", CultureInfo.InvariantCulture);
     }
-    static decimal ReadDecimal(string label)
+
+    static decimal? ReadDecimal(string label, bool acceptNull = false)
     {
         Console.Write($"{label}: ");
         string input = Console.ReadLine();
+        if (acceptNull && string.IsNullOrEmpty(input)) return null;
+
         while (!decimal.TryParse(input, out decimal value))
         {
             Console.Write("Введите число: ");
             input = Console.ReadLine();
+            if (acceptNull && string.IsNullOrEmpty(input)) return null;
         }
         return decimal.Parse(input);
     }
+
     static int ReadInt(string label)
     {
         Console.Write($"{label}: ");
@@ -258,6 +252,7 @@ class Program
         }
         return int.Parse(input);
     }
+
     static void SafeExecuteNonQuery(SqlCommand cmd, string successMessage)
     {
         try

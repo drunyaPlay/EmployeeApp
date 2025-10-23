@@ -111,45 +111,72 @@ class Program
         }
     }
     // Обновление сотрудника
+    // Обновление сотрудника
     static void UpdateEmployee()
     {
         int id = ReadInt("ID сотрудника");
-
-        string[] valid = { "FirstName", "LastName", "Email", "DateOfBirth", "Salary" };
-        string col;
-
-        while (true)
+        using var check = new SqlCommand("SELECT COUNT(*) FROM Employees WHERE EmployeeID=@id", conn);
+        check.Parameters.AddWithValue("@id", id);
+        if ((int)check.ExecuteScalar() == 0)
         {
-            Console.Write("Поле для обновления (FirstName, LastName, Email, DateOfBirth, Salary): ");
-            col = Console.ReadLine()?.Trim();
+            Console.WriteLine("Сотрудник с таким ID не найден.");
+            return;
+        }
 
-            if (Array.Exists(valid, v => v.Equals(col, StringComparison.OrdinalIgnoreCase)))
+        Console.WriteLine("Введите новые значения (Enter — оставить без изменений):");
+
+        string first = ReadString("Имя");
+        string last = ReadString("Фамилия");
+
+        Console.Write("Email: ");
+        string emailInput = Console.ReadLine();
+        string email = string.IsNullOrWhiteSpace(emailInput) ? null : ReadEmail(emailInput);
+
+        Console.Write("Дата рождения (ДД-ММ-ГГГГ): ");
+        string dobInput = Console.ReadLine();
+        DateTime? dob = null;
+        if (!string.IsNullOrWhiteSpace(dobInput))
+        {
+            while (!DateTime.TryParseExact(dobInput, "dd-MM-yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime temp))
             {
-                col = valid[Array.FindIndex(valid, v => v.Equals(col, StringComparison.OrdinalIgnoreCase))];
-                break;
+                Console.Write("Неверный формат, повторите (ДД-ММ-ГГГГ): ");
+                dobInput = Console.ReadLine();
             }
-
-            Console.WriteLine("Некорректное имя поля. Попробуйте снова.");
+            dob = DateTime.ParseExact(dobInput, "dd-MM-yyyy", CultureInfo.InvariantCulture);
         }
 
-        Console.Write("Новое значение: ");
-        string val = Console.ReadLine();
-
-        object value = val;
-        if (col == "DateOfBirth")
-            value = ReadDate("Дата рождения (ДД-ММ-ГГГГ)");
-        else if (col == "Salary")
-            value = ReadDecimal("Зарплата");
-        else if (col == "Email")
-            value = ReadEmail(val);
-
-        string sql = $"UPDATE Employees SET {col} = @v WHERE EmployeeID = @id";
-        using (var cmd = new SqlCommand(sql, conn))
+        Console.Write("Зарплата: ");
+        string salaryInput = Console.ReadLine();
+        decimal? salary = null;
+        if (!string.IsNullOrWhiteSpace(salaryInput))
         {
-            cmd.Parameters.AddWithValue("@v", value);
-            cmd.Parameters.AddWithValue("@id", id);
-            SafeExecuteNonQuery(cmd, "Обновлено.");
+            while (!decimal.TryParse(salaryInput, out decimal val))
+            {
+                Console.Write("Введите корректное число: ");
+                salaryInput = Console.ReadLine();
+            }
+            salary = decimal.Parse(salaryInput);
         }
+
+        var updates = new List<string>();
+        var cmd = new SqlCommand();
+        cmd.Connection = conn;
+
+        if (!string.IsNullOrWhiteSpace(first)) { updates.Add("FirstName=@f"); cmd.Parameters.AddWithValue("@f", first); }
+        if (!string.IsNullOrWhiteSpace(last)) { updates.Add("LastName=@l"); cmd.Parameters.AddWithValue("@l", last); }
+        if (email != null) { updates.Add("Email=@e"); cmd.Parameters.AddWithValue("@e", email); }
+        if (dob.HasValue) { updates.Add("DateOfBirth=@d"); cmd.Parameters.AddWithValue("@d", dob.Value); }
+        if (salary.HasValue) { updates.Add("Salary=@s"); cmd.Parameters.AddWithValue("@s", salary.Value); }
+
+        if (updates.Count == 0)
+        {
+            Console.WriteLine("Нет изменений для обновления.");
+            return;
+        }
+
+        cmd.CommandText = $"UPDATE Employees SET {string.Join(", ", updates)} WHERE EmployeeID=@id";
+        cmd.Parameters.AddWithValue("@id", id);
+        SafeExecuteNonQuery(cmd, "Данные обновлены.");
     }
     // Удаление сотрудника
     static void DeleteEmployee()

@@ -124,6 +124,17 @@ class Program
         int id = ReadInt("ID сотрудника");
         var emp = new Employee { Id = id };
 
+        using (var checkCmd = new SqlCommand("SELECT COUNT(*) FROM Employees WHERE EmployeeID=@id", conn))
+        {
+            checkCmd.Parameters.AddWithValue("@id", id);
+            int exists = (int)checkCmd.ExecuteScalar();
+            if (exists == 0)
+            {
+                Console.WriteLine($"Сотрудник с ID {id} не найден.");
+                return;
+            }
+        }
+
         Console.WriteLine("Оставьте поле пустым, если не нужно обновлять.");
         emp.FirstName = ReadString("Имя", true);
         emp.LastName = ReadString("Фамилия", true);
